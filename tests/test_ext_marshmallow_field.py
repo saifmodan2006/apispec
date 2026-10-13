@@ -1,6 +1,7 @@
 import datetime as dt
 import importlib.metadata
 import re
+import uuid
 from enum import Enum
 
 import pytest
@@ -17,6 +18,51 @@ def test_field2choices_preserving_order(openapi):
     choices = ["a", "b", "c", "aa", "0", "cc"]
     field = fields.String(validate=validate.OneOf(choices))
     assert openapi.field2choices(field) == {"enum": choices}
+
+
+def test_field2choices_serializes_choices(openapi):
+    date_choices = [dt.date(2023, 1, 1), dt.date(2023, 1, 2)]
+    field = fields.Date(validate=validate.OneOf(date_choices))
+    assert openapi.field2choices(field) == {"enum": ["2023-01-01", "2023-01-02"]}
+
+    dtime_choices = [dt.datetime(2023, 1, 1, 12, 0)]
+    field = fields.DateTime(validate=validate.OneOf(dtime_choices))
+    assert openapi.field2choices(field) == {"enum": ["2023-01-01T12:00:00"]}
+
+    u = uuid.uuid4()
+    field = fields.UUID(validate=validate.OneOf([u]))
+    assert openapi.field2choices(field) == {"enum": [str(u)]}
+
+    field = fields.Date(validate=validate.Equal(dt.date(2023, 1, 1)))
+    assert openapi.field2choices(field) == {"enum": ["2023-01-01"]}
+
+
+def test_field2choices_with_labels(openapi):
+    field = fields.Integer(validate=validate.OneOf([1, 2], labels=["one", "two"]))
+    assert openapi.field2choices(field) == {"enum": [1, 2]}
+
+
+def test_enum_field_with_oneof_validator(spec_fixture):
+    class MyEnum(Enum):
+        one = 1
+        two = 2
+        three = 3
+
+    field = fields.Enum(MyEnum, validate=validate.OneOf([MyEnum.one, MyEnum.two]))
+    ret = spec_fixture.openapi.field2property(field)
+    assert ret["type"] == "string"
+    assert ret["enum"] == ["one", "two"]
+
+    field_val = fields.Enum(
+        MyEnum, by_value=True, validate=validate.OneOf([MyEnum.one, MyEnum.two])
+    )
+    ret_val = spec_fixture.openapi.field2property(field_val)
+    assert ret_val["enum"] == [1, 2]
+
+    field_eq = fields.Enum(MyEnum, validate=validate.Equal(MyEnum.two))
+    ret_eq = spec_fixture.openapi.field2property(field_eq)
+    assert ret_eq["type"] == "string"
+    assert ret_eq["enum"] == ["two"]
 
 
 @pytest.mark.parametrize(

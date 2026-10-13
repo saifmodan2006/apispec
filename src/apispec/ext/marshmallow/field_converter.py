@@ -232,6 +232,21 @@ class FieldConverterMixin:
                 ret["default"] = default
         return ret
 
+    def _serialize_choice(
+        self, field: marshmallow.fields.Field, choice: typing.Any
+    ) -> typing.Any:
+        if choice is None:
+            return None
+        target_field = (
+            field.inner if isinstance(field, marshmallow.fields.List) else field
+        )
+        try:
+            val = target_field._serialize(choice, None, None)
+            hash(val)
+            return val
+        except Exception:
+            return choice
+
     def field2choices(
         self, field: marshmallow.fields.Field, **kwargs: typing.Any
     ) -> dict:
@@ -245,9 +260,15 @@ class FieldConverterMixin:
         choices = []
         for validator in field.validators:
             if hasattr(validator, "choices"):
-                choices.append(OrderedSet(validator.choices))
+                choices.append(
+                    OrderedSet(
+                        self._serialize_choice(field, c) for c in validator.choices
+                    )
+                )
             elif hasattr(validator, "comparable"):
-                choices.append(OrderedSet([validator.comparable]))
+                choices.append(
+                    OrderedSet([self._serialize_choice(field, validator.comparable)])
+                )
         if choices:
             attributes["enum"] = list(functools.reduce(operator.and_, choices))
 
@@ -550,13 +571,14 @@ class FieldConverterMixin:
         ret = {}
         if isinstance(field, marshmallow.fields.Enum):
             ret = self.field2property(field.field)
-            if field.by_value is False:
-                choices = (m for m in field.enum.__members__)
-            else:
-                choices = (m.value for m in field.enum)
-            ret["enum"] = [field.field._serialize(v, None, None) for v in choices]
-            if field.allow_none and None not in ret["enum"]:
-                ret["enum"].append(None)
+            if "enum" not in kwargs.get("ret", {}):
+                if field.by_value is False:
+                    choices = (m for m in field.enum.__members__)
+                else:
+                    choices = (m.value for m in field.enum)
+                ret["enum"] = [field.field._serialize(v, None, None) for v in choices]
+                if field.allow_none and None not in ret["enum"]:
+                    ret["enum"].append(None)
         return ret
 
     def datetime2properties(self, field, **kwargs: typing.Any) -> dict:
